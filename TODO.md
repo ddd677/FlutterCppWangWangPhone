@@ -1,5 +1,13 @@
 # 汪汪机开发任务清单
 
+## 项目配置（参考 version.properties）
+
+- **Flutter项目名**：wangwang_phone
+- **Android包名**：com.wangwang.phone
+- **iOS Bundle ID**：com.wangwang.phone
+
+---
+
 ## 阶段零：开发环境构建
 
 ### 0.1 C++开发环境
@@ -21,10 +29,11 @@
 - [ ] 配置mockito测试框架
 
 ### 0.3 项目初始化
-- [ ] 创建Flutter项目结构
+- [ ] 创建Flutter项目（wangwang_phone）
 - [ ] 配置C++核心层CMakeLists
 - [ ] 配置Flutter与C++的FFI集成
-- [ ] 配置iOS/Android平台支持
+- [ ] 配置iOS（Bundle ID: com.wangwang.phone）平台支持
+- [ ] 配置Android（包名: com.wangwang.phone）平台支持
 
 ---
 
