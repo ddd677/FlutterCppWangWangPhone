@@ -2,7 +2,7 @@ name: wangwang_phone
 description: "汪汪机 - AI陪伴虚拟手机应用"
 publish_to: 'none'
 
-version: 3.2.1+5
+version: 3.3.0+6
 
 environment:
   sdk: ^3.11.3
@@ -76,9 +76,3 @@ flutter:
     - assets/icons/
     - assets/animations/
 
-  fonts:
-    - family: WangWang
-      fonts:
-        - asset: assets/fonts/NotoSansSC-Regular.ttf
-        - asset: assets/fonts/NotoSansSC-Bold.ttf
-          weight: 700

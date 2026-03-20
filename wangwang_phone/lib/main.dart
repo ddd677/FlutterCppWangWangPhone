@@ -130,12 +130,17 @@ class AppFlowController extends StateNotifier<AppFlowState> {
       return;
     }
 
-    state = state.copyWith(stage: AppStage.passcodeSetup);
+    state = state.copyWith(stage: AppStage.passcodeSetup, unlockError: null);
   }
 
   /// 点击锁屏界面后，进入密码输入层。
   void activateUnlock() {
     state = state.copyWith(stage: AppStage.passcodeUnlock, unlockError: null);
+  }
+
+  /// 从主屏幕进入密码修改流程。
+  void openPasscodeChange() {
+    state = state.copyWith(stage: AppStage.passcodeChange, unlockError: null);
   }
 
   /// 首次设置六位密码，并同步保存到本地。
@@ -167,6 +172,24 @@ class AppFlowController extends StateNotifier<AppFlowState> {
 
     state = state.copyWith(unlockError: '密码错误，请重新输入');
   }
+
+  /// 修改当前锁屏密码，成功后返回主屏幕。
+  Future<void> changePasscode(String passcode) async {
+    if (passcode.length != 6) {
+      state = state.copyWith(unlockError: '请输入新的6位数字密码');
+      return;
+    }
+
+    await _bootstrap.preferences.setString(
+      AppPreferenceKeys.passcode,
+      passcode,
+    );
+    state = state.copyWith(
+      stage: AppStage.home,
+      hasPasscode: true,
+      unlockError: '密码修改成功',
+    );
+  }
 }
 
 class AppFlowState {
@@ -176,6 +199,7 @@ class AppFlowState {
     required this.shouldSkipLockScreen,
     required this.hasPasscode,
     this.unlockError,
+    this.snackMessage,
   });
 
   final AppStage stage;
@@ -183,6 +207,7 @@ class AppFlowState {
   final bool shouldSkipLockScreen;
   final bool hasPasscode;
   final String? unlockError;
+  final String? snackMessage;
 
   factory AppFlowState.initial({required AppBootstrap bootstrap}) {
     final initialStage = bootstrap.shouldSkipSplash
@@ -207,6 +232,8 @@ class AppFlowState {
     bool? shouldSkipLockScreen,
     bool? hasPasscode,
     String? unlockError,
+    String? snackMessage,
+    bool clearSnackMessage = false,
   }) {
     return AppFlowState(
       stage: stage ?? this.stage,
@@ -214,11 +241,21 @@ class AppFlowState {
       shouldSkipLockScreen: shouldSkipLockScreen ?? this.shouldSkipLockScreen,
       hasPasscode: hasPasscode ?? this.hasPasscode,
       unlockError: unlockError,
+      snackMessage: clearSnackMessage
+          ? null
+          : (snackMessage ?? this.snackMessage),
     );
   }
 }
 
-enum AppStage { splash, lockScreen, passcodeUnlock, passcodeSetup, home }
+enum AppStage {
+  splash,
+  lockScreen,
+  passcodeUnlock,
+  passcodeSetup,
+  passcodeChange,
+  home,
+}
 
 class AppFlowPage extends ConsumerWidget {
   const AppFlowPage({super.key});
@@ -247,7 +284,17 @@ class AppFlowPage extends ConsumerWidget {
         errorText: state.unlockError,
         onSubmit: controller.setupPasscode,
       ),
-      AppStage.home => const HomePage(),
+      AppStage.passcodeChange => PasscodePage(
+        title: '修改密码',
+        description: '请输入新的6位数字密码',
+        actionLabel: '确认修改',
+        errorText: state.unlockError,
+        onSubmit: controller.changePasscode,
+      ),
+      AppStage.home => HomePage(
+        snackMessage: state.snackMessage,
+        onOpenPasscodeChange: controller.openPasscodeChange,
+      ),
     };
   }
 }
@@ -668,7 +715,14 @@ class _PasscodePageState extends State<PasscodePage> {
 }
 
 class HomePage extends StatelessWidget {
-  const HomePage({super.key});
+  const HomePage({
+    super.key,
+    this.snackMessage,
+    required this.onOpenPasscodeChange,
+  });
+
+  final String? snackMessage;
+  final VoidCallback onOpenPasscodeChange;
 
   @override
   Widget build(BuildContext context) {
@@ -693,6 +747,32 @@ class HomePage extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (snackMessage != null) ...[
+                  FrostPanel(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                    borderRadius: 20,
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.check_circle_rounded,
+                          color: Color(0xFFA7F3C2),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            snackMessage!,
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(color: Colors.white),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                ],
                 FrostPanel(
                   padding: const EdgeInsets.all(18),
                   child: Row(
@@ -752,9 +832,25 @@ class HomePage extends StatelessWidget {
                   borderRadius: 28,
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
-                    children: items
-                        .map((item) => _DockIcon(item: item))
-                        .toList(),
+                    children: [
+                      ...items.map((item) => _DockIcon(item: item)),
+                      GestureDetector(
+                        onTap: onOpenPasscodeChange,
+                        child: Container(
+                          width: 52,
+                          height: 52,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          child: const Icon(
+                            Icons.lock_reset_rounded,
+                            color: Colors.white,
+                            size: 26,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
