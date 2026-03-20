@@ -1,4 +1,4 @@
-package com.wangwang.wangwang_phone
+package com.wangwang.phone
 
 import io.flutter.embedding.android.FlutterActivity
 

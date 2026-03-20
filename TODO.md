@@ -32,8 +32,8 @@
 - [x] 创建Flutter项目（wangwang_phone）
 - [x] 配置C++核心层CMakeLists
 - [x] 配置Flutter与C++的FFI集成
-- [ ] 配置iOS（Bundle ID: com.wangwang.phone）平台支持
-- [ ] 配置Android（包名: com.wangwang.phone）平台支持
+- [x] 配置iOS（Bundle ID: com.wangwang.phone）平台支持
+- [x] 配置Android（包名: com.wangwang.phone）平台支持
 
 ---
 
