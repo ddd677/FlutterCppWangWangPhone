@@ -1,0 +1,84 @@
+name: wangwang_phone
+description: "汪汪机 - AI陪伴虚拟手机应用"
+publish_to: 'none'
+
+version: 3.1.0+2
+
+environment:
+  sdk: ^3.11.3
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # UI图标
+  cupertino_icons: ^1.0.8
+
+  # 状态管理
+  flutter_riverpod: ^2.6.1
+  riverpod_annotation: ^2.6.1
+
+  # 网络请求
+  dio: ^5.8.0+1
+
+  # FFI - C++通信
+  ffi: ^2.1.4
+
+  # 日志
+  logging: ^1.3.0
+  logger: ^2.5.0
+
+  # 路径工具
+  path_provider: ^2.1.5
+  path: ^1.9.1
+
+  # 本地文件选择（导入TXT人设）
+  file_picker: ^8.3.7
+
+  # 权限管理（定位权限）
+  permission_handler: ^11.3.1
+
+  # 定位
+  geolocator: ^13.0.4
+
+  # 毛玻璃效果
+  glass_kit: ^3.0.0
+
+  # 共享首选项（轻量配置）
+  shared_preferences: ^2.3.5
+
+  # 图片缓存
+  cached_network_image: ^3.4.1
+
+  # 国际化日期
+  intl: ^0.20.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+  # 代码生成
+  riverpod_generator: ^2.6.5
+  build_runner: ^2.4.15
+
+  # 测试Mock
+  mockito: ^5.4.5
+
+  # FFI代码生成
+  ffigen: ^20.1.1
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/
+    - assets/icons/
+    - assets/animations/
+
+  fonts:
+    - family: WangWang
+      fonts:
+        - asset: assets/fonts/NotoSansSC-Regular.ttf
+        - asset: assets/fonts/NotoSansSC-Bold.ttf
+          weight: 700
