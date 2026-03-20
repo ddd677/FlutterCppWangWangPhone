@@ -11,12 +11,12 @@
 ## 阶段零：开发环境构建
 
 ### 0.1 C++开发环境
-- [ ] 安装CMake构建工具
-- [ ] 配置libcurl开发库
-- [ ] 配置RapidJSON开发库
-- [ ] 配置SQLite开发库
-- [ ] 配置spdlog日志库
-- [ ] 配置Google Test测试框架
+- [x] 安装CMake构建工具
+- [x] 配置libcurl开发库
+- [x] 配置RapidJSON开发库
+- [x] 配置SQLite开发库
+- [x] 配置spdlog日志库
+- [x] 配置Google Test测试框架
 - [x] 配置FFI开发环境
 
 ### 0.2 Flutter开发环境

@@ -2,7 +2,7 @@ name: wangwang_phone
 description: "汪汪机 - AI陪伴虚拟手机应用"
 publish_to: 'none'
 
-version: 3.2.0+4
+version: 3.2.1+5
 
 environment:
   sdk: ^3.11.3

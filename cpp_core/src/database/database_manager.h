@@ -1,7 +1,7 @@
 #pragma once
 #include <string>
 #include <cstdint>
-#include "../../third_party/sqlite/sqlite3.h"
+#include "../../third_party/sqlite3.h"
 
 namespace wangwang {
 
