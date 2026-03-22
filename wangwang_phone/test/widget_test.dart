@@ -53,26 +53,39 @@ WeatherReport _buildFakeReport() {
   );
 }
 
-WangWangApp _buildTestApp({MemoryWeatherSettingsStore? settingsStore}) {
+WangWangApp _buildTestApp({
+  MemoryWeatherSettingsStore? settingsStore,
+  StartupSecurityStore? startupSecurityStore,
+  StartupDebugOptions startupDebugOptions = const StartupDebugOptions(
+    skipSplash: true,
+    skipLockScreen: true,
+  ),
+}) {
   return WangWangApp(
     weatherRepository: _FakeWeatherRepository(_buildFakeReport()),
     weatherSettingsStore: settingsStore ?? MemoryWeatherSettingsStore(),
+    startupSecurityStore:
+        startupSecurityStore ??
+        MemoryStartupSecurityStore(initialPasscode: '246810'),
+    startupDebugOptions: startupDebugOptions,
   );
 }
 
-Map<String, Object> _defaultStartupPrefs() {
-  return const {
-    StartupPreferenceKeys.skipSplash: true,
-    StartupPreferenceKeys.skipLockScreen: true,
-    StartupPreferenceKeys.passcode: '246810',
-  };
+Future<void> _tapPasscodeDigits(
+  WidgetTester tester,
+  String digits,
+) async {
+  for (final digit in digits.split('')) {
+    await tester.tap(find.byKey(Key('startup_keypad_digit_$digit')));
+    await tester.pump(const Duration(milliseconds: 60));
+  }
 }
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUp(() {
-    SharedPreferences.setMockInitialValues(_defaultStartupPrefs());
+    SharedPreferences.setMockInitialValues({});
   });
 
   test('7timer天气类型映射正确', () {
@@ -271,9 +284,12 @@ void main() {
   });
 
   testWidgets('首次启动会经过开屏和密码设置后进入主屏幕', (WidgetTester tester) async {
-    SharedPreferences.setMockInitialValues({});
-
-    await tester.pumpWidget(_buildTestApp());
+    await tester.pumpWidget(
+      _buildTestApp(
+        startupSecurityStore: MemoryStartupSecurityStore(),
+        startupDebugOptions: const StartupDebugOptions(),
+      ),
+    );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 80));
 
@@ -284,11 +300,7 @@ void main() {
 
     expect(find.byKey(const Key('startup_passcode_setup_page')), findsOneWidget);
 
-    await tester.enterText(
-      find.byKey(const Key('startup_passcode_field')),
-      '246810',
-    );
-    await tester.tap(find.byKey(const Key('startup_passcode_submit')));
+    await _tapPasscodeDigits(tester, '246810');
     await tester.pump();
     await tester.pumpAndSettle();
 
@@ -297,11 +309,14 @@ void main() {
   });
 
   testWidgets('已有密码时会经过锁屏和密码解锁后进入主屏幕', (WidgetTester tester) async {
-    SharedPreferences.setMockInitialValues(const {
-      StartupPreferenceKeys.passcode: '246810',
-    });
-
-    await tester.pumpWidget(_buildTestApp());
+    await tester.pumpWidget(
+      _buildTestApp(
+        startupSecurityStore: MemoryStartupSecurityStore(
+          initialPasscode: '246810',
+        ),
+        startupDebugOptions: const StartupDebugOptions(),
+      ),
+    );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 80));
 
@@ -312,25 +327,20 @@ void main() {
 
     expect(find.byKey(const Key('startup_lock_page')), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('startup_lock_unlock_area')));
+    await tester.drag(
+      find.byKey(const Key('startup_lock_swipe_layer')),
+      const Offset(0, -220),
+    );
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('startup_passcode_unlock_page')), findsOneWidget);
 
-    await tester.enterText(
-      find.byKey(const Key('startup_passcode_field')),
-      '111111',
-    );
-    await tester.tap(find.byKey(const Key('startup_passcode_submit')));
+    await _tapPasscodeDigits(tester, '111111');
     await tester.pumpAndSettle();
 
     expect(find.text('密码不正确，请重新输入'), findsOneWidget);
 
-    await tester.enterText(
-      find.byKey(const Key('startup_passcode_field')),
-      '246810',
-    );
-    await tester.tap(find.byKey(const Key('startup_passcode_submit')));
+    await _tapPasscodeDigits(tester, '246810');
     await tester.pump();
     await tester.pumpAndSettle();
 

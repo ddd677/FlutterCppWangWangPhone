@@ -2,7 +2,7 @@ name: wangwang_phone
 description: "汪汪机 - AI陪伴虚拟手机应用"
 publish_to: 'none'
 
-version: 3.4.6+16
+version: 3.4.7+17
 
 environment:
   sdk: ^3.11.3
@@ -46,6 +46,9 @@ dependencies:
 
   # 共享首选项（轻量配置）
   shared_preferences: ^2.3.5
+
+  # SQLite 数据库存储
+  sqflite: ^2.4.2
 
   # 图片缓存
   cached_network_image: ^3.4.1

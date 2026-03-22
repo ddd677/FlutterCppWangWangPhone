@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'startup/startup_flow_page.dart';
+import 'startup/startup_security_store.dart';
 import 'weather/weather_repository.dart';
 import 'weather/weather_settings.dart';
 
@@ -10,12 +10,14 @@ class WangWangApp extends StatelessWidget {
     super.key,
     required this.weatherRepository,
     required this.weatherSettingsStore,
-    this.sharedPreferences,
+    this.startupSecurityStore,
+    this.startupDebugOptions = const StartupDebugOptions(),
   });
 
   final WeatherRepository weatherRepository;
   final WeatherSettingsStore weatherSettingsStore;
-  final SharedPreferences? sharedPreferences;
+  final StartupSecurityStore? startupSecurityStore;
+  final StartupDebugOptions startupDebugOptions;
 
   @override
   Widget build(BuildContext context) {
@@ -46,7 +48,8 @@ class WangWangApp extends StatelessWidget {
       home: StartupFlowPage(
         weatherRepository: weatherRepository,
         weatherSettingsStore: weatherSettingsStore,
-        sharedPreferences: sharedPreferences,
+        securityStore: startupSecurityStore,
+        debugOptions: startupDebugOptions,
       ),
     );
   }

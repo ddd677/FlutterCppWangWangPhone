@@ -1,67 +1,65 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../home/home_page.dart';
 import '../shared/ui.dart';
 import '../weather/weather_repository.dart';
 import '../weather/weather_settings.dart';
+import 'startup_security_store.dart';
 
-/// 启动流程使用的本地配置键，统一管理方便后续扩展调试开关。
-class StartupPreferenceKeys {
-  const StartupPreferenceKeys._();
+class StartupDebugOptions {
+  const StartupDebugOptions({
+    this.skipSplash = false,
+    this.skipLockScreen = false,
+  });
 
-  static const String skipSplash = 'startup.skip_splash';
-  static const String skipLockScreen = 'startup.skip_lockscreen';
-  static const String passcode = 'security.passcode';
+  final bool skipSplash;
+  final bool skipLockScreen;
 }
 
 enum StartupStage { splash, lockScreen, passcodeUnlock, passcodeSetup, home }
 
 class StartupBootstrap {
   const StartupBootstrap({
-    required this.preferences,
+    required this.securityStore,
     required this.shouldSkipSplash,
     required this.shouldSkipLockScreen,
     required this.hasPasscode,
   });
 
-  final SharedPreferences preferences;
+  final StartupSecurityStore securityStore;
   final bool shouldSkipSplash;
   final bool shouldSkipLockScreen;
   final bool hasPasscode;
 
-  /// 加载启动阶段依赖，保证日期格式和本地密码配置在首屏前可用。
+  /// 预先准备日期格式和数据库密码存储，避免首屏阶段出现状态抖动。
   static Future<StartupBootstrap> load({
-    SharedPreferences? sharedPreferences,
+    required StartupSecurityStore securityStore,
+    required StartupDebugOptions debugOptions,
   }) async {
     await initializeDateFormatting('zh_CN');
-    final preferences = sharedPreferences ?? await SharedPreferences.getInstance();
+    await securityStore.initialize();
 
     return StartupBootstrap(
-      preferences: preferences,
-      shouldSkipSplash:
-          preferences.getBool(StartupPreferenceKeys.skipSplash) ?? false,
-      shouldSkipLockScreen:
-          preferences.getBool(StartupPreferenceKeys.skipLockScreen) ?? false,
-      hasPasscode:
-          (preferences.getString(StartupPreferenceKeys.passcode) ?? '').length ==
-          6,
+      securityStore: securityStore,
+      shouldSkipSplash: debugOptions.skipSplash,
+      shouldSkipLockScreen: debugOptions.skipLockScreen,
+      hasPasscode: await securityStore.hasPasscode(),
     );
   }
 
   StartupBootstrap copyWith({
-    SharedPreferences? preferences,
+    StartupSecurityStore? securityStore,
     bool? shouldSkipSplash,
     bool? shouldSkipLockScreen,
     bool? hasPasscode,
   }) {
     return StartupBootstrap(
-      preferences: preferences ?? this.preferences,
+      securityStore: securityStore ?? this.securityStore,
       shouldSkipSplash: shouldSkipSplash ?? this.shouldSkipSplash,
       shouldSkipLockScreen:
           shouldSkipLockScreen ?? this.shouldSkipLockScreen,
@@ -75,18 +73,21 @@ class StartupFlowPage extends StatefulWidget {
     super.key,
     required this.weatherRepository,
     required this.weatherSettingsStore,
-    this.sharedPreferences,
+    this.securityStore,
+    this.debugOptions = const StartupDebugOptions(),
   });
 
   final WeatherRepository weatherRepository;
   final WeatherSettingsStore weatherSettingsStore;
-  final SharedPreferences? sharedPreferences;
+  final StartupSecurityStore? securityStore;
+  final StartupDebugOptions debugOptions;
 
   @override
   State<StartupFlowPage> createState() => _StartupFlowPageState();
 }
 
 class _StartupFlowPageState extends State<StartupFlowPage> {
+  late final StartupSecurityStore _securityStore;
   late final Future<void> _bootstrapFuture;
 
   StartupBootstrap? _bootstrap;
@@ -96,13 +97,15 @@ class _StartupFlowPageState extends State<StartupFlowPage> {
   @override
   void initState() {
     super.initState();
+    _securityStore = widget.securityStore ?? buildDefaultStartupSecurityStore();
     _bootstrapFuture = _loadBootstrap();
   }
 
-  /// 读取本地启动配置并计算本次应用应该进入的首个页面。
+  /// 统一加载启动配置，保证开屏、锁屏和设密逻辑共享同一份状态来源。
   Future<void> _loadBootstrap() async {
     final bootstrap = await StartupBootstrap.load(
-      sharedPreferences: widget.sharedPreferences,
+      securityStore: _securityStore,
+      debugOptions: widget.debugOptions,
     );
     if (!mounted) {
       return;
@@ -115,7 +118,6 @@ class _StartupFlowPageState extends State<StartupFlowPage> {
     });
   }
 
-  /// 根据跳过开屏、锁屏和密码保存状态，恢复完整启动链路。
   StartupStage _resolveInitialStage(StartupBootstrap bootstrap) {
     if (!bootstrap.shouldSkipSplash) {
       return StartupStage.splash;
@@ -129,7 +131,7 @@ class _StartupFlowPageState extends State<StartupFlowPage> {
     return StartupStage.passcodeSetup;
   }
 
-  /// 开屏结束后按当前密码状态衔接到锁屏、设密或主屏。
+  /// 开屏结束后根据密码状态流转到锁屏或首次设密页。
   void _handleSplashFinished() {
     final bootstrap = _bootstrap;
     if (bootstrap == null) {
@@ -155,7 +157,7 @@ class _StartupFlowPageState extends State<StartupFlowPage> {
     });
   }
 
-  /// 首次设置六位数字密码，并立即把用户送入主屏幕。
+  /// 首次设置密码时直接写入数据库 settings 表，确保后续解锁走同一份数据。
   Future<void> _savePasscode(String passcode) async {
     final bootstrap = _bootstrap;
     if (bootstrap == null) {
@@ -168,10 +170,7 @@ class _StartupFlowPageState extends State<StartupFlowPage> {
       return;
     }
 
-    await bootstrap.preferences.setString(
-      StartupPreferenceKeys.passcode,
-      passcode,
-    );
+    await bootstrap.securityStore.writePasscode(passcode);
     if (!mounted) {
       return;
     }
@@ -183,16 +182,18 @@ class _StartupFlowPageState extends State<StartupFlowPage> {
     });
   }
 
-  /// 校验已保存的密码，成功后才允许进入主屏幕。
+  /// 解锁时直接读取数据库密码进行校验，避免和首次设密逻辑分叉。
   Future<void> _unlockWithPasscode(String passcode) async {
     final bootstrap = _bootstrap;
     if (bootstrap == null) {
       return;
     }
 
-    final savedPasscode =
-        bootstrap.preferences.getString(StartupPreferenceKeys.passcode) ?? '';
+    final savedPasscode = await bootstrap.securityStore.readPasscode();
     if (passcode == savedPasscode) {
+      if (!mounted) {
+        return;
+      }
       setState(() {
         _stage = StartupStage.home;
         _errorText = null;
@@ -244,20 +245,20 @@ class _StartupFlowPageState extends State<StartupFlowPage> {
   Widget _buildCurrentStage() {
     return switch (_stage!) {
       StartupStage.splash => _SplashPage(onFinished: _handleSplashFinished),
-      StartupStage.lockScreen => _LockScreenPage(onTapUnlock: _openUnlockPage),
+      StartupStage.lockScreen => _LockScreenPage(onSwipeUnlock: _openUnlockPage),
       StartupStage.passcodeUnlock => _PasscodePage(
         pageKey: const Key('startup_passcode_unlock_page'),
         title: '输入密码',
-        description: '输入 6 位数字密码，回到你的汪汪机桌面',
-        actionLabel: '解锁进入',
+        description: '输入你设置的 6 位数字密码',
+        helperText: '输入完成后会自动解锁',
         errorText: _errorText,
         onSubmit: _unlockWithPasscode,
       ),
       StartupStage.passcodeSetup => _PasscodePage(
         pageKey: const Key('startup_passcode_setup_page'),
         title: '设置密码',
-        description: '首次使用需要创建 6 位数字密码，后续解锁会用到它',
-        actionLabel: '保存并进入',
+        description: '首次进入汪汪机，请先设置 6 位数字密码',
+        helperText: '密码会保存到本地数据库中',
         errorText: _errorText,
         onSubmit: _savePasscode,
       ),
@@ -427,7 +428,7 @@ class _SplashPageState extends State<_SplashPage>
                 FadeTransition(
                   opacity: _taglineOpacity,
                   child: Text(
-                    '像小狗一样陪伴你的 AI 小手机',
+                    '万象成澜，相由心生',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       color: visuals.secondaryText,
@@ -449,7 +450,7 @@ class _SplashPageState extends State<_SplashPage>
                       border: Border.all(color: visuals.badgeBorder),
                     ),
                     child: Text(
-                      '正在进入你的陪伴世界',
+                      '正在进入汪汪机',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: visuals.primaryText,
                         fontWeight: FontWeight.w600,
@@ -467,17 +468,21 @@ class _SplashPageState extends State<_SplashPage>
 }
 
 class _LockScreenPage extends StatefulWidget {
-  const _LockScreenPage({required this.onTapUnlock});
+  const _LockScreenPage({required this.onSwipeUnlock});
 
-  final VoidCallback onTapUnlock;
+  final VoidCallback onSwipeUnlock;
 
   @override
   State<_LockScreenPage> createState() => _LockScreenPageState();
 }
 
 class _LockScreenPageState extends State<_LockScreenPage> {
+  static const double _unlockThreshold = 120;
+
   late final Timer _timer;
   DateTime _now = DateTime.now();
+  double _dragExtent = 0;
+  bool _unlockTriggered = false;
 
   @override
   void initState() {
@@ -498,20 +503,64 @@ class _LockScreenPageState extends State<_LockScreenPage> {
     super.dispose();
   }
 
+  void _handleDragUpdate(DragUpdateDetails details) {
+    if (_unlockTriggered) {
+      return;
+    }
+    if (details.delta.dy >= 0) {
+      return;
+    }
+
+    setState(() {
+      _dragExtent = math
+          .min(_unlockThreshold, _dragExtent + (-details.delta.dy))
+          .toDouble();
+    });
+    if (_dragExtent >= _unlockThreshold) {
+      _triggerUnlock();
+    }
+  }
+
+  void _handleDragEnd(DragEndDetails details) {
+    if (_unlockTriggered) {
+      return;
+    }
+    if (details.primaryVelocity != null && details.primaryVelocity! < -560) {
+      _triggerUnlock();
+      return;
+    }
+
+    setState(() {
+      _dragExtent = 0;
+    });
+  }
+
+  /// 只有达到上滑阈值后才真正切到密码页，避免误触直接解锁。
+  void _triggerUnlock() {
+    if (_unlockTriggered) {
+      return;
+    }
+    _unlockTriggered = true;
+    widget.onSwipeUnlock();
+  }
+
   @override
   Widget build(BuildContext context) {
     final visuals = _StartupVisuals.of(context);
     final timeText = DateFormat('HH:mm').format(_now);
     final dateText = DateFormat('M月d日 EEEE', 'zh_CN').format(_now);
+    final swipeProgress =
+        (_dragExtent / _unlockThreshold).clamp(0.0, 1.0).toDouble();
 
     return Scaffold(
       body: _StartupScene(
         sceneKey: const Key('startup_lock_page'),
         visuals: visuals,
         child: GestureDetector(
-          key: const Key('startup_lock_unlock_area'),
+          key: const Key('startup_lock_swipe_layer'),
           behavior: HitTestBehavior.opaque,
-          onTap: widget.onTapUnlock,
+          onVerticalDragUpdate: _handleDragUpdate,
+          onVerticalDragEnd: _handleDragEnd,
           child: SafeArea(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(24, 28, 24, 28),
@@ -534,90 +583,91 @@ class _LockScreenPageState extends State<_LockScreenPage> {
                     ),
                   ),
                   const Spacer(),
-                  FrostPanel(
-                    padding: const EdgeInsets.all(22),
-                    borderRadius: 30,
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          width: 46,
-                          height: 46,
-                          decoration: BoxDecoration(
-                            color: visuals.notificationBadge,
-                            borderRadius: BorderRadius.circular(16),
+                  Transform.translate(
+                    offset: Offset(0, -24 * swipeProgress),
+                    child: FrostPanel(
+                      padding: const EdgeInsets.all(22),
+                      borderRadius: 30,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: 46,
+                            height: 46,
+                            decoration: BoxDecoration(
+                              color: visuals.notificationBadge,
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            alignment: Alignment.center,
+                            child: const Icon(
+                              Icons.chat_bubble_rounded,
+                              color: Colors.white,
+                              size: 24,
+                            ),
                           ),
-                          alignment: Alignment.center,
-                          child: const Icon(
-                            Icons.chat_bubble_rounded,
-                            color: Colors.white,
-                            size: 24,
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '微信',
+                                  style: Theme.of(context).textTheme.titleMedium
+                                      ?.copyWith(
+                                        color: visuals.primaryText,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  '小雪：我刚刚给你发了一张新照片，记得来看看哦～',
+                                  style: Theme.of(context).textTheme.bodyMedium
+                                      ?.copyWith(
+                                        color: visuals.secondaryText,
+                                        height: 1.5,
+                                      ),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '微信',
-                                style: Theme.of(context).textTheme.titleMedium
-                                    ?.copyWith(
-                                      color: visuals.primaryText,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                '小雪：我刚刚给你发了一张新照片，记得来看看哦～',
-                                style: Theme.of(context).textTheme.bodyMedium
-                                    ?.copyWith(
-                                      color: visuals.secondaryText,
-                                      height: 1.5,
-                                    ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 18,
-                      vertical: 12,
-                    ),
-                    decoration: BoxDecoration(
-                      color: visuals.badgeBackground,
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: visuals.badgeBorder),
-                    ),
-                    child: Text(
-                      '轻点任意位置开始解锁',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: visuals.primaryText,
-                        fontWeight: FontWeight.w700,
+                        ],
                       ),
                     ),
                   ),
                   const Spacer(),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.keyboard_arrow_up_rounded,
-                        color: visuals.secondaryText,
-                        size: 24,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        '进入密码界面',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: visuals.secondaryText,
+                  Transform.translate(
+                    offset: Offset(0, -48 * swipeProgress),
+                    child: Column(
+                      children: [
+                        Container(
+                          width: 128,
+                          height: 38,
+                          decoration: BoxDecoration(
+                            color: visuals.badgeBackground,
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(color: visuals.badgeBorder),
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
+                            '上滑解锁',
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: visuals.primaryText,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 16),
+                        AnimatedOpacity(
+                          opacity: 1 - swipeProgress * 0.6,
+                          duration: const Duration(milliseconds: 120),
+                          child: Icon(
+                            Icons.keyboard_arrow_up_rounded,
+                            color: visuals.secondaryText,
+                            size: 30,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -634,7 +684,7 @@ class _PasscodePage extends StatefulWidget {
     required this.pageKey,
     required this.title,
     required this.description,
-    required this.actionLabel,
+    required this.helperText,
     required this.onSubmit,
     this.errorText,
   });
@@ -642,7 +692,7 @@ class _PasscodePage extends StatefulWidget {
   final Key pageKey;
   final String title;
   final String description;
-  final String actionLabel;
+  final String helperText;
   final String? errorText;
   final Future<void> Function(String passcode) onSubmit;
 
@@ -651,47 +701,62 @@ class _PasscodePage extends StatefulWidget {
 }
 
 class _PasscodePageState extends State<_PasscodePage> {
-  final TextEditingController _controller = TextEditingController();
-  final FocusNode _focusNode = FocusNode();
+  String _value = '';
   bool _submitting = false;
 
   @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _focusNode.requestFocus();
-      }
+  void didUpdateWidget(covariant _PasscodePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.errorText != null &&
+        widget.errorText != oldWidget.errorText &&
+        mounted) {
+      setState(() {
+        _value = '';
+        _submitting = false;
+      });
+    }
+  }
+
+  void _appendDigit(String digit) {
+    if (_submitting || _value.length >= 6) {
+      return;
+    }
+
+    setState(() {
+      _value = '$_value$digit';
+    });
+
+    if (_value.length == 6) {
+      _submit();
+    }
+  }
+
+  void _removeLastDigit() {
+    if (_submitting || _value.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      _value = _value.substring(0, _value.length - 1);
     });
   }
 
-  @override
-  void dispose() {
-    _controller.dispose();
-    _focusNode.dispose();
-    super.dispose();
-  }
-
+  /// 自定义数字键盘满 6 位后自动提交，尽量贴近 iOS 密码输入体验。
   Future<void> _submit() async {
-    if (_submitting) {
+    if (_submitting || _value.length != 6) {
       return;
     }
+
     setState(() {
       _submitting = true;
     });
-    await widget.onSubmit(_controller.text);
+    await widget.onSubmit(_value);
     if (!mounted) {
       return;
     }
     setState(() {
       _submitting = false;
     });
-  }
-
-  void _clearInput() {
-    _controller.clear();
-    setState(() {});
-    _focusNode.requestFocus();
   }
 
   @override
@@ -702,151 +767,90 @@ class _PasscodePageState extends State<_PasscodePage> {
       body: _StartupScene(
         sceneKey: widget.pageKey,
         visuals: visuals,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () {
-            _focusNode.requestFocus();
-          },
-          child: SafeArea(
-            child: Center(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
-                child: FrostPanel(
-                  padding: const EdgeInsets.all(28),
-                  borderRadius: 32,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 72,
-                        height: 72,
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [
-                              visuals.accentPrimary,
-                              visuals.accentSecondary,
-                            ],
-                          ),
-                          borderRadius: BorderRadius.circular(24),
-                          boxShadow: [
-                            BoxShadow(
-                              color: visuals.accentPrimary.withValues(alpha: 0.24),
-                              blurRadius: 24,
-                              offset: const Offset(0, 12),
-                            ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
+              child: FrostPanel(
+                padding: const EdgeInsets.all(28),
+                borderRadius: 32,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 72,
+                      height: 72,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            visuals.accentPrimary,
+                            visuals.accentSecondary,
                           ],
                         ),
-                        alignment: Alignment.center,
-                        child: const Icon(
-                          Icons.lock_rounded,
-                          color: Colors.white,
-                          size: 34,
-                        ),
+                        borderRadius: BorderRadius.circular(24),
+                        boxShadow: [
+                          BoxShadow(
+                            color: visuals.accentPrimary.withValues(alpha: 0.24),
+                            blurRadius: 24,
+                            offset: const Offset(0, 12),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 22),
+                      alignment: Alignment.center,
+                      child: const Icon(
+                        Icons.lock_rounded,
+                        color: Colors.white,
+                        size: 34,
+                      ),
+                    ),
+                    const SizedBox(height: 22),
+                    Text(
+                      widget.title,
+                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        color: visuals.primaryText,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      widget.description,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: visuals.secondaryText,
+                        height: 1.6,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    _PasscodeDots(valueLength: _value.length, visuals: visuals),
+                    const SizedBox(height: 18),
+                    Text(
+                      _submitting ? '处理中...' : widget.helperText,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: visuals.secondaryText,
+                        height: 1.5,
+                      ),
+                    ),
+                    if (widget.errorText != null) ...[
+                      const SizedBox(height: 12),
                       Text(
-                        widget.title,
-                        style: Theme.of(context).textTheme.headlineSmall
-                            ?.copyWith(
-                              color: visuals.primaryText,
-                              fontWeight: FontWeight.w800,
-                            ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        widget.description,
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          color: visuals.secondaryText,
-                          height: 1.6,
+                        widget.errorText!,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: visuals.errorText,
+                          fontWeight: FontWeight.w700,
                         ),
-                      ),
-                      const SizedBox(height: 24),
-                      _PasscodeDots(
-                        valueLength: _controller.text.length,
-                        visuals: visuals,
-                      ),
-                      SizedBox(
-                        height: 1,
-                        child: TextField(
-                          key: const Key('startup_passcode_field'),
-                          controller: _controller,
-                          focusNode: _focusNode,
-                          autofocus: true,
-                          keyboardType: TextInputType.number,
-                          textInputAction: TextInputAction.done,
-                          onSubmitted: (_) {
-                            _submit();
-                          },
-                          onChanged: (_) {
-                            setState(() {});
-                          },
-                          inputFormatters: const [
-                            FilteringTextInputFormatter.digitsOnly,
-                            LengthLimitingTextInputFormatter(6),
-                          ],
-                          cursorColor: Colors.transparent,
-                          style: const TextStyle(
-                            color: Colors.transparent,
-                            fontSize: 1,
-                            height: 0.01,
-                          ),
-                          decoration: const InputDecoration(
-                            isCollapsed: true,
-                            border: InputBorder.none,
-                            contentPadding: EdgeInsets.zero,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      InlineHint(
-                        message: _controller.text.length < 6
-                            ? '请输入 6 位数字密码'
-                            : '密码长度正确，可以继续',
-                      ),
-                      if (widget.errorText != null) ...[
-                        const SizedBox(height: 12),
-                        Text(
-                          widget.errorText!,
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: visuals.errorText,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: 24),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton(
-                          key: const Key('startup_passcode_submit'),
-                          onPressed: _submitting ? null : _submit,
-                          style: FilledButton.styleFrom(
-                            backgroundColor: visuals.accentPrimary,
-                            foregroundColor: Colors.white,
-                            disabledBackgroundColor:
-                                visuals.accentPrimary.withValues(alpha: 0.42),
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                          ),
-                          child: Text(
-                            _submitting ? '处理中...' : widget.actionLabel,
-                            style: Theme.of(context).textTheme.titleMedium
-                                ?.copyWith(fontWeight: FontWeight.w800),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      TextButton(
-                        key: const Key('startup_passcode_clear'),
-                        onPressed: _controller.text.isEmpty ? null : _clearInput,
-                        child: const Text('重新输入'),
                       ),
                     ],
-                  ),
+                    const SizedBox(height: 28),
+                    _PasscodeKeypad(
+                      visuals: visuals,
+                      submitting: _submitting,
+                      onDigitPressed: _appendDigit,
+                      onDeletePressed: _removeLastDigit,
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -896,6 +900,105 @@ class _PasscodeDots extends StatelessWidget {
           ),
         );
       }),
+    );
+  }
+}
+
+class _PasscodeKeypad extends StatelessWidget {
+  const _PasscodeKeypad({
+    required this.visuals,
+    required this.submitting,
+    required this.onDigitPressed,
+    required this.onDeletePressed,
+  });
+
+  final _StartupVisuals visuals;
+  final bool submitting;
+  final ValueChanged<String> onDigitPressed;
+  final VoidCallback onDeletePressed;
+
+  @override
+  Widget build(BuildContext context) {
+    const rows = [
+      ['1', '2', '3'],
+      ['4', '5', '6'],
+      ['7', '8', '9'],
+      ['', '0', '<'],
+    ];
+
+    return Column(
+      children: [
+        for (var rowIndex = 0; rowIndex < rows.length; rowIndex++) ...[
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              for (var columnIndex = 0; columnIndex < rows[rowIndex].length; columnIndex++)
+                Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: _buildKey(context, rows[rowIndex][columnIndex]),
+                ),
+            ],
+          ),
+          if (rowIndex != rows.length - 1) const SizedBox(height: 4),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildKey(BuildContext context, String value) {
+    if (value.isEmpty) {
+      return const SizedBox(width: 82, height: 82);
+    }
+
+    final isDelete = value == '<';
+    final key = isDelete
+        ? const Key('startup_keypad_backspace')
+        : Key('startup_keypad_digit_$value');
+    final label = isDelete ? '删除' : value;
+
+    return Semantics(
+      button: true,
+      label: label,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          key: key,
+          borderRadius: BorderRadius.circular(999),
+          onTap: submitting
+              ? null
+              : () {
+                  if (isDelete) {
+                    onDeletePressed();
+                  } else {
+                    onDigitPressed(value);
+                  }
+                },
+          child: Ink(
+            width: 82,
+            height: 82,
+            decoration: BoxDecoration(
+              color: visuals.badgeBackground,
+              shape: BoxShape.circle,
+              border: Border.all(color: visuals.badgeBorder),
+            ),
+            child: Center(
+              child: isDelete
+                  ? Icon(
+                      Icons.backspace_outlined,
+                      color: visuals.primaryText,
+                      size: 28,
+                    )
+                  : Text(
+                      value,
+                      style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                        color: visuals.primaryText,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
