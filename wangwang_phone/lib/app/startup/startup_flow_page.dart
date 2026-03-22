@@ -23,6 +23,8 @@ class StartupDebugOptions {
 
 enum StartupStage { splash, lockScreen, passcodeUnlock, passcodeSetup, home }
 
+const String _startupLogoAssetPath = 'assets/images/app_logo.png';
+
 class StartupBootstrap {
   const StartupBootstrap({
     required this.securityStore,
@@ -364,6 +366,24 @@ class _SplashPageState extends State<_SplashPage>
     super.dispose();
   }
 
+  /// 启动页 Logo 统一走 Flutter 工程内资源，避免父目录路径在不同平台被规范化后无法命中。
+  Widget _buildStartupLogo(_StartupVisuals visuals) {
+    return Image.asset(
+      _startupLogoAssetPath,
+      fit: BoxFit.cover,
+      filterQuality: FilterQuality.high,
+      errorBuilder: (context, error, stackTrace) {
+        return Center(
+          child: Icon(
+            Icons.pets_rounded,
+            size: 56,
+            color: visuals.primaryText.withValues(alpha: 0.88),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final visuals = _StartupVisuals.of(context);
@@ -405,10 +425,7 @@ class _SplashPageState extends State<_SplashPage>
                         ],
                       ),
                       clipBehavior: Clip.antiAlias,
-                      child: Image.asset(
-                        '../asset/app_logo.png',
-                        fit: BoxFit.cover,
-                      ),
+                      child: _buildStartupLogo(visuals),
                     ),
                   ),
                 ),
