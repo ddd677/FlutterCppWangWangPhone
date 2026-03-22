@@ -248,7 +248,7 @@ class _StartupFlowPageState extends State<StartupFlowPage> {
       StartupStage.lockScreen => _LockScreenPage(onSwipeUnlock: _openUnlockPage),
       StartupStage.passcodeUnlock => _PasscodePage(
         pageKey: const Key('startup_passcode_unlock_page'),
-        title: '输入密码',
+        title: '输入锁屏密码',
         description: '输入你设置的 6 位数字密码',
         helperText: '输入完成后会自动解锁',
         errorText: _errorText,
@@ -404,10 +404,10 @@ class _SplashPageState extends State<_SplashPage>
                           ),
                         ],
                       ),
-                      child: const Icon(
-                        Icons.pets_rounded,
-                        color: Colors.white,
-                        size: 70,
+                      clipBehavior: Clip.antiAlias,
+                      child: Image.asset(
+                        '../asset/app_logo.png',
+                        fit: BoxFit.cover,
                       ),
                     ),
                   ),

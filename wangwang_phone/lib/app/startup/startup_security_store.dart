@@ -59,6 +59,12 @@ class SqliteStartupSecurityStore implements StartupSecurityStore {
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
+  @override
+  Future<bool> hasPasscode() async {
+    final passcode = await readPasscode();
+    return passcode != null && passcode.length == 6;
+  }
+
   Future<Database> _openDatabase() async {
     if (_database != null) {
       return _database!;
@@ -107,5 +113,11 @@ class MemoryStartupSecurityStore implements StartupSecurityStore {
   @override
   Future<void> writePasscode(String passcode) async {
     _passcode = passcode;
+  }
+
+  @override
+  Future<bool> hasPasscode() async {
+    final passcode = await readPasscode();
+    return passcode != null && passcode.length == 6;
   }
 }
