@@ -374,6 +374,40 @@ void main() {
     expect(find.byIcon(Icons.lock_reset_rounded), findsOneWidget);
   });
 
+  testWidgets('长按桌面图标后进入整理模式', (WidgetTester tester) async {
+    await tester.pumpWidget(_buildTestApp());
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.longPress(find.byKey(const Key('home_app_chat')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('home_icon_edit_banner')), findsOneWidget);
+    expect(find.textContaining('桌面整理中'), findsOneWidget);
+  });
+
+  testWidgets('长按拖动桌面图标后会按目标格位重新排序', (WidgetTester tester) async {
+    await tester.pumpWidget(_buildTestApp());
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    final weatherFinder = find.byKey(const Key('home_app_weather'));
+    final chatFinder = find.byKey(const Key('home_app_chat'));
+    final chatCenter = tester.getCenter(chatFinder);
+
+    final gesture = await tester.startGesture(tester.getCenter(weatherFinder));
+    await tester.pump(const Duration(milliseconds: 700));
+    await gesture.moveTo(chatCenter);
+    await tester.pump(const Duration(milliseconds: 200));
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    final weatherCenter = tester.getCenter(weatherFinder);
+    expect(find.byKey(const Key('home_icon_edit_banner')), findsOneWidget);
+    expect(weatherCenter.dx, closeTo(chatCenter.dx, 2));
+    expect(weatherCenter.dy, closeTo(chatCenter.dy, 2));
+  });
+
   testWidgets('桌面天气小组件初始展示加载状态', (WidgetTester tester) async {
     await tester.pumpWidget(_buildTestApp());
 

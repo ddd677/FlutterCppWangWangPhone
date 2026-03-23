@@ -1,4 +1,7 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../chat/chat_app_page.dart';
 import '../chat/chat_controller.dart';
@@ -26,41 +29,45 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage>
+    with SingleTickerProviderStateMixin {
   late final WeatherController _weatherController;
   late final TemperatureUnitController _temperatureUnitController;
   late final ChatAppController _chatController;
+  late final AnimationController _iconJiggleController;
+  bool _isEditingIcons = false;
+  WangWangAppModule? _draggingModule;
 
-  final List<_AppIconData> _items = const [
-    _AppIconData(
+  final List<_AppIconData> _items = [
+    const _AppIconData(
       module: WangWangAppModule.chat,
       label: '微信',
       icon: Icons.chat_bubble_rounded,
       color: Color(0xFF5EDC7E),
       subtitle: '和 AI 好友聊天',
     ),
-    _AppIconData(
+    const _AppIconData(
       module: WangWangAppModule.memory,
       label: '记忆',
       icon: Icons.psychology_alt_rounded,
       color: Color(0xFFFFA25A),
       subtitle: '查看 summary 和 memory',
     ),
-    _AppIconData(
+    const _AppIconData(
       module: WangWangAppModule.diary,
       label: '日记',
       icon: Icons.menu_book_rounded,
       color: Color(0xFFEF7FB0),
       subtitle: '查看 diary 记录',
     ),
-    _AppIconData(
+    const _AppIconData(
       module: WangWangAppModule.settings,
       label: '设置',
       icon: Icons.settings_rounded,
       color: Color(0xFF7D8BFF),
       subtitle: '管理系统与接口',
     ),
-    _AppIconData(
+    const _AppIconData(
       module: WangWangAppModule.weather,
       label: '天气',
       icon: Icons.wb_sunny_rounded,
@@ -72,6 +79,10 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    _iconJiggleController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 190),
+    );
     _weatherController = WeatherController(repository: widget.weatherRepository)
       ..loadWeather();
     _temperatureUnitController = TemperatureUnitController(
@@ -84,6 +95,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    _iconJiggleController.dispose();
     _weatherController.dispose();
     _temperatureUnitController.dispose();
     _chatController.dispose();
@@ -126,19 +138,62 @@ class _HomePageState extends State<HomePage> {
                 ),
                 const SizedBox(height: 28),
                 Expanded(
-                  child: GridView.builder(
-                    itemCount: _items.length,
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 4,
-                          crossAxisSpacing: 18,
-                          mainAxisSpacing: 24,
-                          childAspectRatio: 0.82,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: _isEditingIcons ? _exitIconEditMode : null,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 220),
+                          switchInCurve: Curves.easeOutCubic,
+                          switchOutCurve: Curves.easeInCubic,
+                          child: _isEditingIcons
+                              ? Padding(
+                                  key: const ValueKey('home_icon_edit_banner'),
+                                  padding: const EdgeInsets.only(bottom: 14),
+                                  child: _EditModeBanner(
+                                    onDone: _exitIconEditMode,
+                                  ),
+                                )
+                              : const SizedBox(
+                                  key: ValueKey('home_icon_edit_banner_hidden'),
+                                ),
                         ),
-                    itemBuilder: (context, index) {
-                      final item = _items[index];
-                      return _AppIcon(item: item, onTap: () => _openApp(item));
-                    },
+                        Expanded(
+                          child: GridView.builder(
+                            key: const Key('home_app_grid'),
+                            physics: const BouncingScrollPhysics(),
+                            itemCount: _items.length,
+                            gridDelegate:
+                                const SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: 4,
+                                  crossAxisSpacing: 18,
+                                  mainAxisSpacing: 24,
+                                  childAspectRatio: 0.82,
+                                ),
+                            itemBuilder: (context, index) {
+                              final item = _items[index];
+                              return KeyedSubtree(
+                                key: ValueKey(item.module),
+                                child: _AppIcon(
+                                  item: item,
+                                  isEditing: _isEditingIcons,
+                                  isDragging: _draggingModule == item.module,
+                                  jiggleAnimation: _iconJiggleController,
+                                  onTap: () => _openApp(item),
+                                  onDragStarted: () =>
+                                      _handleIconDragStarted(item),
+                                  onDragMovedTo: (draggedItem) =>
+                                      _reorderHomeIcons(draggedItem, item),
+                                  onDragFinished: _handleIconDragFinished,
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
                 FrostPanel(
@@ -151,8 +206,11 @@ class _HomePageState extends State<HomePage> {
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
                     children: [
                       ..._items.map(
-                        (item) =>
-                            _DockIcon(item: item, onTap: () => _openApp(item)),
+                        (item) => _DockIcon(
+                          item: item,
+                          isEditing: _isEditingIcons,
+                          onTap: () => _openApp(item),
+                        ),
                       ),
                       Container(
                         width: 52,
@@ -180,6 +238,11 @@ class _HomePageState extends State<HomePage> {
 
   /// 统一处理桌面图标跳转，后续补真实聊天页和设置页时只需要替换目标页面。
   void _openApp(_AppIconData item) {
+    if (_isEditingIcons) {
+      _exitIconEditMode();
+      return;
+    }
+
     final page = switch (item.module) {
       WangWangAppModule.weather => WeatherDetailPage(
         controller: _weatherController,
@@ -200,6 +263,11 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _openWeatherPage() {
+    if (_isEditingIcons) {
+      _exitIconEditMode();
+      return;
+    }
+
     Navigator.of(context).push(
       _buildPageRoute(
         WeatherDetailPage(
@@ -208,6 +276,73 @@ class _HomePageState extends State<HomePage> {
         ),
       ),
     );
+  }
+
+  /// 长按桌面图标后进入整理态，并启动仿 iOS 的轻微抖动反馈。
+  void _enterIconEditMode() {
+    if (_isEditingIcons) {
+      return;
+    }
+
+    HapticFeedback.mediumImpact();
+    _iconJiggleController.repeat(reverse: true);
+    setState(() {
+      _isEditingIcons = true;
+    });
+  }
+
+  void _exitIconEditMode() {
+    if (!_isEditingIcons || _draggingModule != null) {
+      return;
+    }
+
+    _iconJiggleController.stop();
+    _iconJiggleController.value = 0;
+    setState(() {
+      _isEditingIcons = false;
+    });
+  }
+
+  void _handleIconDragStarted(_AppIconData item) {
+    _enterIconEditMode();
+    if (_draggingModule == item.module) {
+      return;
+    }
+
+    setState(() {
+      _draggingModule = item.module;
+    });
+  }
+
+  /// 拖拽过程中按目标格位实时换位，让图标跟手移动，而不是松手后才跳动。
+  void _reorderHomeIcons(_AppIconData draggedItem, _AppIconData targetItem) {
+    if (draggedItem.module == targetItem.module) {
+      return;
+    }
+
+    final fromIndex = _items.indexWhere(
+      (item) => item.module == draggedItem.module,
+    );
+    final toIndex = _items.indexWhere((item) => item.module == targetItem.module);
+    if (fromIndex == -1 || toIndex == -1 || fromIndex == toIndex) {
+      return;
+    }
+
+    HapticFeedback.selectionClick();
+    setState(() {
+      final movedItem = _items.removeAt(fromIndex);
+      _items.insert(toIndex, movedItem);
+    });
+  }
+
+  void _handleIconDragFinished() {
+    if (_draggingModule == null) {
+      return;
+    }
+
+    setState(() {
+      _draggingModule = null;
+    });
   }
 }
 
@@ -407,82 +542,279 @@ class _RoadmapTile extends StatelessWidget {
   }
 }
 
-class _AppIcon extends StatelessWidget {
-  const _AppIcon({required this.item, required this.onTap});
+class _EditModeBanner extends StatelessWidget {
+  const _EditModeBanner({required this.onDone});
 
-  final _AppIconData item;
-  final VoidCallback onTap;
+  final VoidCallback onDone;
 
   @override
   Widget build(BuildContext context) {
     final palette = HomePalette.of(context);
 
-    return Semantics(
-      button: true,
-      label: '打开${item.label}',
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          key: Key('home_app_${item.module.name}'),
-          borderRadius: BorderRadius.circular(24),
-          onTap: onTap,
-          child: Column(
-            children: [
-              Container(
-                width: 64,
-                height: 64,
-                decoration: BoxDecoration(
-                  color: item.color,
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(
-                      color: item.color.withValues(alpha: 0.35),
-                      blurRadius: 18,
-                      offset: const Offset(0, 8),
-                    ),
-                  ],
-                ),
-                child: Icon(item.icon, color: Colors.white, size: 32),
+    return FrostPanel(
+      key: const Key('home_icon_edit_banner'),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      borderRadius: 20,
+      child: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: palette.iconSurface,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            alignment: Alignment.center,
+            child: Icon(
+              Icons.drag_indicator_rounded,
+              color: palette.primaryText,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              '桌面整理中，长按拖动图标排序，点空白也能退出',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: palette.primaryText,
+                fontWeight: FontWeight.w600,
               ),
-              const SizedBox(height: 10),
-              Text(
-                item.label,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.copyWith(color: palette.primaryText),
+            ),
+          ),
+          const SizedBox(width: 10),
+          TextButton(
+            onPressed: onDone,
+            child: const Text('完成'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AppIcon extends StatelessWidget {
+  const _AppIcon({
+    required this.item,
+    required this.isEditing,
+    required this.isDragging,
+    required this.jiggleAnimation,
+    required this.onTap,
+    required this.onDragStarted,
+    required this.onDragMovedTo,
+    required this.onDragFinished,
+  });
+
+  final _AppIconData item;
+  final bool isEditing;
+  final bool isDragging;
+  final Animation<double> jiggleAnimation;
+  final VoidCallback onTap;
+  final VoidCallback onDragStarted;
+  final ValueChanged<_AppIconData> onDragMovedTo;
+  final VoidCallback onDragFinished;
+
+  @override
+  Widget build(BuildContext context) {
+    return DragTarget<_AppIconData>(
+      onWillAcceptWithDetails: (details) {
+        final draggedItem = details.data;
+        if (draggedItem.module == item.module) {
+          return false;
+        }
+
+        onDragMovedTo(draggedItem);
+        return true;
+      },
+      builder: (context, candidateData, rejectedData) {
+        final isDropTarget = candidateData.isNotEmpty;
+        final iconFrame = _AppIconFrame(
+          item: item,
+          isEditing: isEditing,
+          isDragging: isDragging,
+          isDropTarget: isDropTarget,
+          jiggleAnimation: jiggleAnimation,
+        );
+
+        return LongPressDraggable<_AppIconData>(
+          data: item,
+          hapticFeedbackOnStart: false,
+          onDragStarted: onDragStarted,
+          onDragEnd: (_) => onDragFinished(),
+          feedback: Material(color: Colors.transparent, child: iconFrame),
+          childWhenDragging: Opacity(
+            opacity: 0.22,
+            child: IgnorePointer(
+              child: _AppIconFrame(
+                item: item,
+                isEditing: false,
+                isDragging: false,
+                isDropTarget: false,
+                jiggleAnimation: const AlwaysStoppedAnimation<double>(0),
               ),
-            ],
+            ),
+          ),
+          child: Semantics(
+            button: true,
+            label: isEditing ? '拖动${item.label}' : '打开${item.label}',
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                key: Key('home_app_${item.module.name}'),
+                borderRadius: BorderRadius.circular(24),
+                onTap: onTap,
+                child: iconFrame,
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _AppIconFrame extends StatelessWidget {
+  const _AppIconFrame({
+    required this.item,
+    required this.isEditing,
+    required this.isDragging,
+    required this.isDropTarget,
+    required this.jiggleAnimation,
+  });
+
+  final _AppIconData item;
+  final bool isEditing;
+  final bool isDragging;
+  final bool isDropTarget;
+  final Animation<double> jiggleAnimation;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = HomePalette.of(context);
+    return AnimatedBuilder(
+      animation: jiggleAnimation,
+      builder: (context, child) {
+        final rotation =
+            isDragging
+                ? 0.045
+                : isEditing
+                ? math.sin(
+                      (jiggleAnimation.value * math.pi * 2) +
+                          (item.module.index * 0.85),
+                    ) *
+                    0.026
+                : 0.0;
+
+        return SizedBox(
+          width: 74,
+          child: Transform.rotate(
+            angle: rotation,
+            child: AnimatedScale(
+              duration: const Duration(milliseconds: 160),
+              curve: Curves.easeOutCubic,
+              scale: isDragging ? 1.08 : (isDropTarget ? 0.96 : 1),
+              child: child,
+            ),
           ),
         ),
+      },
+      child: Column(
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              color: item.color,
+              borderRadius: BorderRadius.circular(20),
+              border: isDropTarget
+                  ? Border.all(
+                      color: Colors.white.withValues(alpha: 0.84),
+                      width: 1.4,
+                    )
+                  : null,
+              boxShadow: [
+                BoxShadow(
+                  color: item.color.withValues(alpha: isDragging ? 0.46 : 0.35),
+                  blurRadius: isDragging ? 24 : 18,
+                  offset: Offset(0, isDragging ? 14 : 8),
+                ),
+              ],
+            ),
+            child: Stack(
+              children: [
+                Center(child: Icon(item.icon, color: Colors.white, size: 32)),
+                if (isEditing)
+                  Positioned(
+                    top: 6,
+                    right: 6,
+                    child: Container(
+                      width: 16,
+                      height: 16,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.92),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      alignment: Alignment.center,
+                      child: Icon(
+                        Icons.drag_indicator_rounded,
+                        color: item.color,
+                        size: 11,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            item.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: palette.primaryText,
+              fontWeight: isEditing ? FontWeight.w600 : FontWeight.w500,
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
 class _DockIcon extends StatelessWidget {
-  const _DockIcon({required this.item, required this.onTap});
+  const _DockIcon({
+    required this.item,
+    required this.isEditing,
+    required this.onTap,
+  });
 
   final _AppIconData item;
+  final bool isEditing;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final palette = HomePalette.of(context);
 
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        key: Key('home_dock_${item.module.name}'),
-        borderRadius: BorderRadius.circular(18),
-        onTap: onTap,
-        child: Container(
-          width: 52,
-          height: 52,
-          decoration: BoxDecoration(
-            color: palette.iconSurface,
-            borderRadius: BorderRadius.circular(18),
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 160),
+      opacity: isEditing ? 0.72 : 1,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          key: Key('home_dock_${item.module.name}'),
+          borderRadius: BorderRadius.circular(18),
+          onTap: onTap,
+          child: Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: palette.iconSurface,
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Icon(item.icon, color: palette.primaryText, size: 26),
           ),
-          child: Icon(item.icon, color: palette.primaryText, size: 26),
         ),
       ),
     );
