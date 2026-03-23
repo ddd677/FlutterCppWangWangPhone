@@ -673,158 +673,44 @@ class _ChatThreadsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final palette = ChatPalette.of(context);
     final threadList = controller.threads;
-    final unreadTotal = threadList.fold<int>(
-      0,
-      (count, thread) => count + thread.unreadCount,
-    );
+    final palette = ChatPalette.of(context);
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-      children: [
-        FrostPanel(
-          padding: const EdgeInsets.all(18),
-          child: Row(
-            children: [
-              Expanded(
-                child: _DashboardMetric(
-                  label: '活跃会话',
-                  value: '${threadList.length}',
-                  color: palette.accentColor,
-                ),
-              ),
-              Expanded(
-                child: _DashboardMetric(
-                  label: '未读消息',
-                  value: '$unreadTotal',
-                  color: palette.secondaryAccentColor,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 18),
-        ...threadList.map((thread) {
-          final contact = controller.contactById(thread.contactId);
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: FrostPanel(
-              padding: const EdgeInsets.all(14),
-              borderRadius: 24,
-              child: InkWell(
-                key: Key('chat_thread_${contact.id}'),
-                borderRadius: BorderRadius.circular(20),
-                onTap: () {
-                  onOpenConversation(contact);
-                },
-                child: Row(
-                  children: [
-                    _Avatar(color: contact.avatarColor, label: contact.emoji),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  contact.name,
-                                  style: Theme.of(context).textTheme.titleMedium
-                                      ?.copyWith(
-                                        color: palette.primaryText,
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                ),
-                              ),
-                              Text(
-                                _formatThreadTime(thread.updatedAt),
-                                style: Theme.of(context).textTheme.bodySmall
-                                    ?.copyWith(color: palette.secondaryText),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            contact.signature,
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(
-                                  color: palette.secondaryText,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                          ),
-                          const SizedBox(height: 8),
-                          Row(
-                            children: [
-                              if (thread.isPinned)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: palette.accentColor.withValues(
-                                      alpha: 0.16,
-                                    ),
-                                    borderRadius: BorderRadius.circular(999),
-                                  ),
-                                  child: Text(
-                                    '置顶',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .labelSmall
-                                        ?.copyWith(
-                                          color: palette.accentColor,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                  ),
-                                ),
-                              if (thread.isPinned) const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  thread.lastMessage,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.bodyMedium
-                                      ?.copyWith(
-                                        color: palette.primaryText,
-                                        height: 1.45,
-                                      ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    if (thread.unreadCount > 0)
-                      Container(
-                        height: 26,
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        constraints: const BoxConstraints(minWidth: 26),
-                        decoration: BoxDecoration(
-                          color: palette.unreadBadgeColor,
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        alignment: Alignment.center,
-                        child: Text(
-                          '${thread.unreadCount}',
-                          style: Theme.of(context).textTheme.labelMedium
-                              ?.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w700,
-                              ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
+    if (threadList.isEmpty) {
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        children: [
+          FrostPanel(
+            padding: const EdgeInsets.all(18),
+            borderRadius: 24,
+            child: Text(
+              '还没有会话，先去联系人里开启一段聊天吧。',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyLarge?.copyWith(color: palette.secondaryText),
             ),
-          );
-        }),
-      ],
+          ),
+        ],
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
+      itemCount: threadList.length,
+      itemBuilder: (context, index) {
+        final thread = threadList[index];
+        final contact = controller.contactById(thread.contactId);
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: index == threadList.length - 1 ? 0 : 6,
+          ),
+          child: _ChatThreadTile(
+            contact: contact,
+            thread: thread,
+            onTap: onOpenConversation,
+          ),
+        );
+      },
     );
   }
 }
@@ -1724,6 +1610,153 @@ class _TypingBubble extends StatelessWidget {
   }
 }
 
+class _ChatThreadTile extends StatelessWidget {
+  const _ChatThreadTile({
+    required this.contact,
+    required this.thread,
+    required this.onTap,
+  });
+
+  final ChatContact contact;
+  final ChatThread thread;
+  final ValueChanged<ChatContact> onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = ChatPalette.of(context);
+    final hasUnread = thread.unreadCount > 0;
+    final timeColor = hasUnread ? palette.accentColor : palette.secondaryText;
+    final previewColor = hasUnread ? palette.primaryText : palette.secondaryText;
+    final borderColor = thread.isPinned
+        ? palette.accentColor.withValues(alpha: 0.14)
+        : palette.threadDividerColor;
+
+    // 置顶会话不再额外塞入标签，直接通过更深底色表达状态，保证列表更紧凑。
+    final tileColor = thread.isPinned
+        ? palette.threadPinnedSurface
+        : palette.threadSurface;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        key: Key('chat_thread_${contact.id}'),
+        borderRadius: BorderRadius.circular(20),
+        onTap: () {
+          onTap(contact);
+        },
+        child: Ink(
+          decoration: BoxDecoration(
+            color: tileColor,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: borderColor),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: [
+                _Avatar(
+                  color: contact.avatarColor,
+                  label: contact.emoji,
+                  size: 48,
+                  shadowOpacity: 0.14,
+                  shadowBlurRadius: 8,
+                  shadowOffset: const Offset(0, 4),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              contact.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleMedium
+                                  ?.copyWith(
+                                    color: palette.primaryText,
+                                    fontWeight: hasUnread
+                                        ? FontWeight.w800
+                                        : FontWeight.w700,
+                                  ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            _formatThreadTime(thread.updatedAt),
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: timeColor,
+                                  fontWeight: hasUnread
+                                      ? FontWeight.w700
+                                      : FontWeight.w500,
+                                ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              thread.lastMessage,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(
+                                    color: previewColor,
+                                    fontWeight: hasUnread
+                                        ? FontWeight.w600
+                                        : FontWeight.w500,
+                                    height: 1.2,
+                                  ),
+                            ),
+                          ),
+                          if (hasUnread) const SizedBox(width: 10),
+                          if (hasUnread)
+                            Container(
+                              constraints: const BoxConstraints(
+                                minWidth: 22,
+                                minHeight: 22,
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: palette.unreadBadgeColor,
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(
+                                thread.unreadCount > 99
+                                    ? '99+'
+                                    : '${thread.unreadCount}',
+                                style: Theme.of(context).textTheme.labelSmall
+                                    ?.copyWith(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _DashboardMetric extends StatelessWidget {
   const _DashboardMetric({
     required this.label,
@@ -1905,11 +1938,21 @@ class _InfoRow extends StatelessWidget {
 }
 
 class _Avatar extends StatelessWidget {
-  const _Avatar({required this.color, required this.label, this.size = 54});
+  const _Avatar({
+    required this.color,
+    required this.label,
+    this.size = 54,
+    this.shadowOpacity = 0.28,
+    this.shadowBlurRadius = 14,
+    this.shadowOffset = const Offset(0, 8),
+  });
 
   final Color color;
   final String label;
   final double size;
+  final double shadowOpacity;
+  final double shadowBlurRadius;
+  final Offset shadowOffset;
 
   @override
   Widget build(BuildContext context) {
@@ -1921,9 +1964,9 @@ class _Avatar extends StatelessWidget {
         borderRadius: BorderRadius.circular(size * 0.34),
         boxShadow: [
           BoxShadow(
-            color: color.withValues(alpha: 0.28),
-            blurRadius: 14,
-            offset: const Offset(0, 8),
+            color: color.withValues(alpha: shadowOpacity),
+            blurRadius: shadowBlurRadius,
+            offset: shadowOffset,
           ),
         ],
       ),
@@ -1951,6 +1994,9 @@ class ChatPalette {
     required this.navigationIndicator,
     required this.navigationSelectedText,
     required this.navigationUnselectedText,
+    required this.threadSurface,
+    required this.threadPinnedSurface,
+    required this.threadDividerColor,
     required this.userBubble,
     required this.aiBubble,
     required this.sendButtonColor,
@@ -1966,6 +2012,9 @@ class ChatPalette {
   final Color navigationIndicator;
   final Color navigationSelectedText;
   final Color navigationUnselectedText;
+  final Color threadSurface;
+  final Color threadPinnedSurface;
+  final Color threadDividerColor;
   final Color userBubble;
   final Color aiBubble;
   final Color sendButtonColor;
@@ -1988,6 +2037,9 @@ class ChatPalette {
         navigationIndicator: Color(0x2477D992),
         navigationSelectedText: Colors.white,
         navigationUnselectedText: Color(0xBFFFFFFF),
+        threadSurface: Color(0x12FFFFFF),
+        threadPinnedSurface: Color(0x24313E37),
+        threadDividerColor: Color(0x1FFFFFFF),
         userBubble: Color(0xFF2E8D57),
         aiBubble: Color(0x18FFFFFF),
         sendButtonColor: Color(0xFF2E8D57),
@@ -2009,6 +2061,9 @@ class ChatPalette {
       navigationIndicator: Color(0x1E56B26F),
       navigationSelectedText: Color(0xFF1E2A24),
       navigationUnselectedText: Color(0xFF76847C),
+      threadSurface: Color(0xD9FFFFFF),
+      threadPinnedSurface: Color(0xFFF0F5F1),
+      threadDividerColor: Color(0x1466736D),
       userBubble: Color(0xFF56B26F),
       aiBubble: Color(0xFFFFFFFF),
       sendButtonColor: Color(0xFF56B26F),
