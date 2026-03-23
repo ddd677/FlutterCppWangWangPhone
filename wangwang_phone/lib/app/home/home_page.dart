@@ -701,7 +701,7 @@ class _AppIconFrame extends StatelessWidget {
               child: child,
             ),
           ),
-        ),
+        );
       },
       child: Column(
         children: [
